@@ -1,7 +1,16 @@
+# Build output
 target/
-!.mvn/wrapper/maven-wrapper.jar
-!**/src/main/**/target/
 *.class
+
+# Maven wrapper (not essential - user can use their own maven)
+.mvn/
+mvnw
+mvnw.cmd
+
+# Error logs and temp files
+compile_errors*.txt
+help.md
+*.tmp
 
 # Mobile Tools for Java (J2ME)
 .mtj.tmp/
