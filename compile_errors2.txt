@@ -1,0 +1,23 @@
+﻿[INFO] Scanning for projects...
+[INFO] 
+[INFO] ------------------< com.iotaccess:iot-access-system >-------------------
+[INFO] Building IoT Access System 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.3.2:clean (default-clean) @ iot-access-system ---
+[INFO] Deleting C:\Users\doxxt\OneDrive\Desktop\V1\iot-access-system\target
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ iot-access-system ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 2 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ iot-access-system ---
+[INFO] Changes detected - recompiling the module! :source
+[INFO] Compiling 29 source files with javac [debug release 17] to target\classes
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  3.483 s
+[INFO] Finished at: 2026-02-03T14:25:22-06:00
+[INFO] ------------------------------------------------------------------------
