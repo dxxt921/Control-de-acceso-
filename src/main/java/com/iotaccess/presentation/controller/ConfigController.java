@@ -3,11 +3,11 @@ package com.iotaccess.presentation.controller;
 import com.iotaccess.application.dto.SessionStatusDto;
 import com.iotaccess.application.service.AccessService;
 import com.iotaccess.domain.model.SerialPortInfo;
+import com.iotaccess.infrastructure.serial.SerialPortScanner;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
-import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -23,19 +23,14 @@ import java.util.Map;
 public class ConfigController {
 
     private final AccessService accessService;
+    private final SerialPortScanner portScanner;
 
     /**
-     * Página principal de configuración.
+     * Redirección a la página principal (dashboard).
      */
     @GetMapping("/")
-    public String index(Model model) {
-        List<SerialPortInfo> ports = accessService.getAvailablePorts();
-        SessionStatusDto status = accessService.getSessionStatus();
-
-        model.addAttribute("ports", ports);
-        model.addAttribute("sessionStatus", status);
-
-        return "index";
+    public String index() {
+        return "redirect:/dashboard";
     }
 
     /**
@@ -132,5 +127,17 @@ public class ConfigController {
     @ResponseBody
     public ResponseEntity<SessionStatusDto> getSessionStatus() {
         return ResponseEntity.ok(accessService.getSessionStatus());
+    }
+
+    /**
+     * API: Prueba de conexión con un puerto serial.
+     * Envía PING y espera PONG del firmware de control de acceso.
+     */
+    @PostMapping("/api/ports/test")
+    @ResponseBody
+    public ResponseEntity<Map<String, Object>> testPort(@RequestParam String portName) {
+        log.info("Probando conexión en puerto: {}", portName);
+        Map<String, Object> result = portScanner.probePort(portName);
+        return ResponseEntity.ok(result);
     }
 }

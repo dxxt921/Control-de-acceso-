@@ -4,6 +4,7 @@ import com.iotaccess.application.dto.AccessRecordDto;
 import com.iotaccess.application.dto.SessionStatusDto;
 import com.iotaccess.application.scheduler.BatchProcessingJob;
 import com.iotaccess.application.service.AccessService;
+import com.iotaccess.domain.model.SerialPortInfo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -17,6 +18,7 @@ import java.util.Map;
 
 /**
  * Controlador para el dashboard de monitoreo en tiempo real.
+ * Ahora es la página principal de la aplicación.
  */
 @Controller
 @RequiredArgsConstructor
@@ -27,23 +29,22 @@ public class DashboardController {
     private final BatchProcessingJob batchProcessingJob;
 
     /**
-     * Página del dashboard.
+     * Página principal - Dashboard.
+     * Siempre muestra el dashboard, con o sin sesión activa.
      */
     @GetMapping("/dashboard")
     public String dashboard(Model model) {
         SessionStatusDto status = accessService.getSessionStatus();
-
-        // Si no hay sesión activa, redirigir a configuración
-        if (!status.isActive()) {
-            return "redirect:/";
-        }
-
         List<AccessRecordDto> records = accessService.getLatestRecords(50);
         AccessService.DayStatsDto stats = accessService.getDayStats();
+
+        // Datos de puertos para el modal de configuración
+        List<SerialPortInfo> ports = accessService.getAvailablePorts();
 
         model.addAttribute("sessionStatus", status);
         model.addAttribute("records", records);
         model.addAttribute("stats", stats);
+        model.addAttribute("ports", ports);
 
         return "dashboard";
     }
@@ -127,6 +128,49 @@ public class DashboardController {
 
         } catch (Exception e) {
             log.error("Error simulando acceso: {}", e.getMessage());
+            response.put("success", false);
+            response.put("message", "Error: " + e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    /**
+     * API: Renombra la sesión activa (cambia el nombre del CSV).
+     */
+    @PostMapping("/api/session/rename")
+    @ResponseBody
+    public ResponseEntity<Map<String, Object>> renameSession(@RequestParam String newName) {
+        Map<String, Object> response = new HashMap<>();
+
+        try {
+            SessionStatusDto status = accessService.getSessionStatus();
+            if (!status.isActive()) {
+                response.put("success", false);
+                response.put("message", "No hay sesión activa para renombrar");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            // Limpiar nombre
+            newName = newName.replaceAll("[^a-zA-Z0-9_-]", "_");
+            if (newName.isBlank()) {
+                response.put("success", false);
+                response.put("message", "El nombre no puede estar vacío");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            // Detener sesión actual y reiniciar con nuevo nombre
+            String currentPort = status.getPortName();
+            accessService.stopSession();
+            accessService.startSession(currentPort, newName);
+
+            response.put("success", true);
+            response.put("message", "Sesión renombrada a: " + newName);
+            response.put("newName", newName);
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error renombrando sesión: {}", e.getMessage());
             response.put("success", false);
             response.put("message", "Error: " + e.getMessage());
             return ResponseEntity.badRequest().body(response);

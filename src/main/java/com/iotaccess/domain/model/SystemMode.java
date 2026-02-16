@@ -10,6 +10,11 @@ public enum SystemMode {
     ACCESO,
 
     /**
+     * Modo de espera de validación del administrador
+     */
+    ESPERANDO_ADMIN,
+
+    /**
      * Modo de enrolamiento - captura UIDs para registrar nuevos dispositivos
      */
     ENROLAMIENTO

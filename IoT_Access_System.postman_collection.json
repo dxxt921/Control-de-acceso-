@@ -1,0 +1,491 @@
+{
+	"info": {
+		"_postman_id": "iot-access-system-v1",
+		"name": "IoT Access System - API Collection",
+		"description": "Colección completa de endpoints para el Sistema de Control de Acceso IoT.\n\nEl sistema debe estar corriendo en http://localhost:8080\n\n**Flujo recomendado:**\n1. Verificar puertos disponibles\n2. Iniciar sesión de captura\n3. Probar acceso / enrolamiento\n4. Consultar registros y estadísticas\n5. Ejecutar batch manual\n6. Detener sesión",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:8080",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Estado del Sistema",
+			"description": "Endpoints para consultar el estado general del sistema.",
+			"item": [
+				{
+					"name": "GET Estado Completo del Sistema",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/system/status",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"system",
+								"status"
+							]
+						},
+						"description": "Devuelve un JSON con el estado completo del sistema: Serial Listener, Batch Processing, sesión activa, modo del sistema, usuarios registrados, clientes WebSocket, horario de operación, y estadísticas del día."
+					},
+					"response": []
+				},
+				{
+					"name": "GET Estado de la Sesión",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/session/status",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"session",
+								"status"
+							]
+						},
+						"description": "Obtiene el estado actual de la sesión de captura (activa/inactiva, puerto, nombre, registros)."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Configuración y Sesión",
+			"description": "Gestión de puertos seriales y sesiones de captura.",
+			"item": [
+				{
+					"name": "GET Puertos Disponibles",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/ports",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"ports"
+							]
+						},
+						"description": "Lista todos los puertos seriales disponibles en el sistema."
+					},
+					"response": []
+				},
+				{
+					"name": "POST Refrescar Puertos",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/ports/refresh",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"ports",
+								"refresh"
+							]
+						},
+						"description": "Re-escanea los puertos seriales disponibles."
+					},
+					"response": []
+				},
+				{
+					"name": "POST Iniciar Sesión de Captura",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/x-www-form-urlencoded"
+							}
+						],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "portName",
+									"value": "COM3",
+									"description": "Nombre del puerto serial (e.g. COM3, COM4)"
+								},
+								{
+									"key": "sessionName",
+									"value": "sesion_prueba",
+									"description": "Nombre descriptivo para la sesión"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/session/start",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"session",
+								"start"
+							]
+						},
+						"description": "Inicia una sesión de captura en el puerto serial especificado. Cambia portName al que tengas disponible."
+					},
+					"response": []
+				},
+				{
+					"name": "POST Detener Sesión",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/session/stop",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"session",
+								"stop"
+							]
+						},
+						"description": "Detiene la sesión de captura activa y cierra la conexión serial."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Registros de Acceso",
+			"description": "Consulta de registros de acceso y estadísticas.",
+			"item": [
+				{
+					"name": "GET Últimos Registros",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/records/latest",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"records",
+								"latest"
+							]
+						},
+						"description": "Obtiene los últimos registros de acceso capturados."
+					},
+					"response": []
+				},
+				{
+					"name": "GET Registros del Día",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/records/today",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"records",
+								"today"
+							]
+						},
+						"description": "Obtiene todos los registros de acceso del día actual."
+					},
+					"response": []
+				},
+				{
+					"name": "GET Estadísticas del Día",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/stats",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"stats"
+							]
+						},
+						"description": "Devuelve estadísticas del día actual: total de accesos, accesos permitidos, denegados, y última hora de acceso."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Gestión de Dispositivos",
+			"description": "CRUD de usuarios y proceso de enrolamiento de nuevos dispositivos NFC.",
+			"item": [
+				{
+					"name": "GET Todos los Dispositivos",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/devices",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"devices"
+							]
+						},
+						"description": "Lista todos los usuarios/dispositivos NFC registrados."
+					},
+					"response": []
+				},
+				{
+					"name": "GET Conteo de Dispositivos",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/devices/count",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"devices",
+								"count"
+							]
+						},
+						"description": "Obtiene la cantidad total de dispositivos registrados."
+					},
+					"response": []
+				},
+				{
+					"name": "GET Estado del Enrolamiento",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/devices/enrollment/status",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"devices",
+								"enrollment",
+								"status"
+							]
+						},
+						"description": "Consulta el estado actual del modo de enrolamiento."
+					},
+					"response": []
+				},
+				{
+					"name": "POST Iniciar Enrolamiento",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/devices/enrollment/start",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"devices",
+								"enrollment",
+								"start"
+							]
+						},
+						"description": "Inicia el modo de enrolamiento (20 segundos). Requiere validación del administrador primero."
+					},
+					"response": []
+				},
+				{
+					"name": "POST Confirmar Enrolamiento",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"uid\": \"AB-CD-EF-12\",\n    \"name\": \"Nombre del Usuario\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/devices/enrollment/confirm",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"devices",
+								"enrollment",
+								"confirm"
+							]
+						},
+						"description": "Confirma el enrolamiento de un dispositivo detectado, asignándole un nombre de usuario."
+					},
+					"response": []
+				},
+				{
+					"name": "POST Cancelar Enrolamiento",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/devices/enrollment/cancel",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"devices",
+								"enrollment",
+								"cancel"
+							]
+						},
+						"description": "Cancela el modo de enrolamiento activo."
+					},
+					"response": []
+				},
+				{
+					"name": "DELETE Eliminar Dispositivo",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/devices/AB-CD-EF-12",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"devices",
+								"AB-CD-EF-12"
+							]
+						},
+						"description": "Elimina un dispositivo por su UID. Reemplaza 'AB-CD-EF-12' con el UID real del dispositivo."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Proceso Batch",
+			"description": "Ejecución y configuración del proceso batch de sincronización.",
+			"item": [
+				{
+					"name": "POST Ejecutar Batch Manual",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/batch/run",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"batch",
+								"run"
+							]
+						},
+						"description": "Ejecuta el proceso batch manualmente. Sincroniza usuarios CSV a MySQL y procesa archivos de logs de acceso."
+					},
+					"response": []
+				},
+				{
+					"name": "POST Reprogramar Horario Batch",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/system/batch/schedule?hour=14&minute=30",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"system",
+								"batch",
+								"schedule"
+							],
+							"query": [
+								{
+									"key": "hour",
+									"value": "14",
+									"description": "Hora del día (0-23)"
+								},
+								{
+									"key": "minute",
+									"value": "30",
+									"description": "Minuto (0-59)"
+								}
+							]
+						},
+						"description": "Cambia la hora programada del batch. Ejemplo: hour=14&minute=30 lo programa a las 2:30 PM. El cambio es inmediato y no requiere reiniciar la app."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Testing",
+			"description": "Endpoints de prueba para simulación.",
+			"item": [
+				{
+					"name": "POST Simular Acceso",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/x-www-form-urlencoded"
+							}
+						],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "uid",
+									"value": "4A B1 C2 33",
+									"description": "UID del dispositivo NFC a simular"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/test/access",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"test",
+								"access"
+							]
+						},
+						"description": "Simula un evento de acceso con el UID especificado. Útil para testing sin hardware."
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}

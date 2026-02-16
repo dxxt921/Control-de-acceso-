@@ -155,6 +155,50 @@ public class AccessWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
+     * Notifica que se requiere validación del administrador.
+     * 
+     * @param secondsRemaining Segundos restantes para validar
+     */
+    public void broadcastAdminRequired(int secondsRemaining) {
+        broadcast("ADMIN_REQUIRED", new AdminRequiredData(secondsRemaining));
+    }
+
+    /**
+     * Notifica que el administrador fue validado correctamente.
+     */
+    public void broadcastAdminApproved() {
+        broadcast("ADMIN_APPROVED", new AdminApprovedData(true, "Administrador validado correctamente"));
+    }
+
+    /**
+     * Notifica que la tarjeta no corresponde al administrador.
+     * 
+     * @param message Mensaje de error
+     */
+    public void broadcastAdminRejected(String message) {
+        broadcast("ADMIN_REJECTED", new ErrorData(message));
+    }
+
+    /**
+     * Notifica que el proceso batch ha iniciado.
+     */
+    public void broadcastBatchStarted() {
+        broadcast("BATCH_STARTED", new BatchStartedData(java.time.LocalDateTime.now().toString()));
+    }
+
+    /**
+     * Notifica que el proceso batch ha finalizado.
+     *
+     * @param recordsProcessed Registros procesados
+     * @param errors           Número de errores
+     * @param success          Si fue exitoso
+     */
+    public void broadcastBatchCompleted(int recordsProcessed, int errors, boolean success) {
+        broadcast("BATCH_COMPLETED",
+                new BatchCompletedData(recordsProcessed, errors, success, java.time.LocalDateTime.now().toString()));
+    }
+
+    /**
      * Método genérico para broadcast de mensajes.
      */
     private void broadcast(String type, Object data) {
@@ -206,5 +250,17 @@ public class AccessWebSocketHandler extends TextWebSocketHandler {
     }
 
     record ErrorData(String message) {
+    }
+
+    record AdminRequiredData(int secondsRemaining) {
+    }
+
+    record AdminApprovedData(boolean approved, String message) {
+    }
+
+    record BatchStartedData(String startTime) {
+    }
+
+    record BatchCompletedData(int recordsProcessed, int errors, boolean success, String completedTime) {
     }
 }

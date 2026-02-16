@@ -121,9 +121,13 @@ public class SerialListener {
     /**
      * Envía un comando de un carácter al Arduino.
      * Comandos:
+     * - 'W': Esperar tarjeta del admin
      * - 'E': Entrar en Modo Enrolamiento (Arduino muestra "MODO REGISTRO")
-     * - 'A': Volver a Modo Acceso (Arduino muestra "ACERQUE NFC")
-     * - 'K': Confirmación de registro exitoso (Arduino pita/parpadea)
+     * - 'A': Volver a Modo Acceso
+     * - 'K': Confirmación de registro exitoso
+     * - 'X': Admin rechazado
+     * - '1': Acceso concedido
+     * - '0': Acceso denegado
      * 
      * @param command Carácter del comando a enviar
      */
@@ -134,8 +138,8 @@ public class SerialListener {
         }
 
         try {
-            byte[] data = new byte[] { (byte) command };
-            int written = currentPort.writeBytes(data, 1);
+            byte[] data = new byte[] { (byte) command, (byte) '\n' };
+            int written = currentPort.writeBytes(data, 2);
 
             if (written > 0) {
                 log.info("Comando '{}' enviado al Arduino exitosamente", command);
@@ -144,6 +148,33 @@ public class SerialListener {
             }
         } catch (Exception e) {
             log.error("Error enviando comando '{}' al Arduino: {}", command, e.getMessage());
+        }
+    }
+
+    /**
+     * Envía un mensaje completo (string) al Arduino.
+     * Usado para enviar datos como nombres de usuario.
+     * Formato: "COMANDO:DATOS\n"
+     * 
+     * @param message Mensaje a enviar
+     */
+    public void sendMessage(String message) {
+        if (currentPort == null || !currentPort.isOpen()) {
+            log.warn("No se puede enviar mensaje '{}': puerto no disponible", message);
+            return;
+        }
+
+        try {
+            byte[] data = (message + "\n").getBytes();
+            int written = currentPort.writeBytes(data, data.length);
+
+            if (written > 0) {
+                log.info("Mensaje '{}' enviado al Arduino exitosamente", message);
+            } else {
+                log.warn("No se pudo escribir el mensaje '{}' al puerto", message);
+            }
+        } catch (Exception e) {
+            log.error("Error enviando mensaje '{}' al Arduino: {}", message, e.getMessage());
         }
     }
 
@@ -193,6 +224,10 @@ public class SerialListener {
 
             if (uidCallback != null) {
                 try {
+                    // Llamar DIRECTAMENTE en el hilo del lector serial
+                    // para que la respuesta al Arduino sea INMEDIATA.
+                    // processIncomingUid() envia la respuesta primero
+                    // y luego las ops lentas las hace en background.
                     uidCallback.accept(uid);
                 } catch (Exception e) {
                     log.error("Error en callback de UID: {}", e.getMessage(), e);

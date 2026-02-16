@@ -37,6 +37,12 @@ public class CsvAccessLogReader implements AccessLogReader {
     @Value("${csv.history-path:./history}")
     private String historyPath;
 
+    private final CsvAccessLogWriter csvAccessLogWriter;
+
+    public CsvAccessLogReader(CsvAccessLogWriter csvAccessLogWriter) {
+        this.csvAccessLogWriter = csvAccessLogWriter;
+    }
+
     @Override
     public List<AccessRecord> readFromFile(Path filePath) {
         log.info("Leyendo archivo CSV: {}", filePath);
@@ -76,13 +82,31 @@ public class CsvAccessLogReader implements AccessLogReader {
             return new ArrayList<>();
         }
 
+        // Obtener la ruta del archivo activo (sesión en curso)
+        String activeFilePath = csvAccessLogWriter.getCurrentFilePath();
+
         try (Stream<Path> files = Files.list(logsDir)) {
             List<Path> csvFiles = files
                     .filter(path -> path.toString().endsWith(".csv"))
                     .filter(Files::isRegularFile)
+                    // Excluir archivos de registro de usuarios
+                    .filter(path -> !path.getFileName().toString().startsWith("user_registry"))
+                    // Excluir el archivo de la sesión activa
+                    .filter(path -> {
+                        if (activeFilePath != null) {
+                            try {
+                                return !path.toAbsolutePath().normalize()
+                                        .equals(Paths.get(activeFilePath).toAbsolutePath().normalize());
+                            } catch (Exception e) {
+                                return true;
+                            }
+                        }
+                        return true;
+                    })
                     .collect(Collectors.toList());
 
-            log.info("Encontrados {} archivos CSV pendientes", csvFiles.size());
+            log.info("Encontrados {} archivos CSV pendientes (excluido archivo activo: {})",
+                    csvFiles.size(), activeFilePath != null ? Paths.get(activeFilePath).getFileName() : "ninguno");
             return csvFiles;
 
         } catch (IOException e) {

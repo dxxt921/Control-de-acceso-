@@ -23,6 +23,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
@@ -51,6 +52,10 @@ public class AccessServiceImpl implements AccessService {
 
     @Value("${station.id:1}")
     private Integer stationId;
+
+    // UID del administrador desde configuración
+    @Value("${admin.uid:EB-EE-C0-1}")
+    private String adminUid;
 
     // Almacenamiento en memoria de la sesión actual
     private CaptureSession currentSession;
@@ -148,30 +153,39 @@ public class AccessServiceImpl implements AccessService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Verifica si el UID corresponde al administrador.
+     */
+    private boolean isAdminUid(String uid) {
+        return uid != null && adminUid != null
+                && uid.toUpperCase().trim().equals(adminUid.toUpperCase().trim());
+    }
+
     @Override
     public void processIncomingUid(String uid) {
         log.info("Procesando UID: {}", uid);
+
+        // IMPORTANTE: Verificar si estamos en modo de espera del admin
+        if (deviceManagementService != null && deviceManagementService.isWaitingForAdmin()) {
+            log.info("Modo ESPERANDO_ADMIN activo - validando tarjeta del administrador");
+            deviceManagementService.validateAdminUid(uid);
+            return;
+        }
 
         // IMPORTANTE: Verificar si estamos en modo enrolamiento
         if (deviceManagementService != null && deviceManagementService.isEnrollmentMode()) {
             log.info("Modo enrolamiento activo - capturando UID para registro");
             deviceManagementService.captureUidForEnrollment(uid);
-            return; // No procesar como acceso normal
+            return;
         }
 
-        // Verificar SOLO en el registro local (user_registry.csv)
-        // La base de datos NO se usa para validación de acceso, solo para
-        // sincronización batch
-        boolean isRegistered = userRegistryPort.existsByUid(uid);
-        log.info("Verificación LOCAL para UID '{}': {}", uid, isRegistered);
+        // === OPERACIONES RAPIDAS (en el hilo del lector serial) ===
 
-        String userName = userRegistryPort.findByUid(uid)
-                .map(user -> user.getName())
-                .orElse("No registrado");
+        boolean isAdmin = isAdminUid(uid);
+        boolean isRegistered = isAdmin || userRegistryPort.existsByUid(uid);
+        log.info("UID '{}': registrado={}, esAdmin={}", uid, isRegistered, isAdmin);
 
-        AccessStatus status = isRegistered ? AccessStatus.GRANTED : AccessStatus.DENIED;
-
-        // IMPORTANTE: Enviar respuesta al Arduino ('1' = permitido, '0' = denegado)
+        // CRITICO: Enviar respuesta al Arduino INMEDIATAMENTE
         try {
             char response = isRegistered ? '1' : '0';
             serialListener.sendCommand(response);
@@ -180,37 +194,64 @@ public class AccessServiceImpl implements AccessService {
             log.error("Error enviando respuesta al Arduino: {}", e.getMessage());
         }
 
-        // Crear registro
-        AccessRecord record = AccessRecord.builder()
-                .uid(uid)
-                .timestamp(LocalDateTime.now())
-                .status(status)
-                .stationId(stationId)
-                .userName(userName)
-                .build();
+        // === OPERACIONES LENTAS (en hilo background) ===
+        // El hilo del lector serial queda libre para seguir leyendo.
 
-        // Escribir a CSV
-        if (logWriter.isReady()) {
-            logWriter.write(record);
-        }
+        final boolean finalIsAdmin = isAdmin;
+        final boolean finalIsRegistered = isRegistered;
 
-        // Agregar a cache en memoria
-        todayRecords.add(record);
+        CompletableFuture.runAsync(() -> {
+            try {
+                String userName;
+                if (finalIsAdmin) {
+                    userName = "Administrador";
+                } else {
+                    userName = userRegistryPort.findByUid(uid)
+                            .map(user -> user.getName())
+                            .orElse("No registrado");
+                }
 
-        // Actualizar contador de sesión
-        if (currentSession != null && currentSession.isActive()) {
-            currentSession.incrementRecordCount();
-        }
+                AccessStatus status = finalIsRegistered ? AccessStatus.GRANTED : AccessStatus.DENIED;
 
-        // Notificar a clientes WebSocket
-        try {
-            AccessRecordDto dto = AccessRecordDto.fromDomain(record);
-            webSocketHandler.broadcastRecord(dto);
-        } catch (Exception e) {
-            log.error("Error notificando WebSocket: {}", e.getMessage());
-        }
+                AccessRecord record = AccessRecord.builder()
+                        .uid(uid)
+                        .timestamp(LocalDateTime.now())
+                        .status(status)
+                        .stationId(stationId)
+                        .userName(userName)
+                        .build();
 
-        log.info("UID procesado: {} - {} - {}", uid, status, userName);
+                // Escribir a CSV
+                try {
+                    if (logWriter.isReady()) {
+                        logWriter.write(record);
+                    }
+                } catch (Exception e) {
+                    log.error("Error escribiendo CSV: {}", e.getMessage());
+                }
+
+                // Cache en memoria
+                todayRecords.add(record);
+
+                // Contador de sesión
+                if (currentSession != null && currentSession.isActive()) {
+                    currentSession.incrementRecordCount();
+                }
+
+                // WebSocket
+                try {
+                    AccessRecordDto dto = AccessRecordDto.fromDomain(record);
+                    webSocketHandler.broadcastRecord(dto);
+                } catch (Exception e) {
+                    log.error("Error notificando WebSocket: {}", e.getMessage());
+                }
+
+                log.info("UID procesado: {} - {} - {}", uid, status, userName);
+
+            } catch (Exception e) {
+                log.error("Error en procesamiento async de UID: {}", e.getMessage(), e);
+            }
+        });
     }
 
     @Override

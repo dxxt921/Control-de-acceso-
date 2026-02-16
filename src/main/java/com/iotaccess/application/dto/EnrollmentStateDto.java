@@ -58,4 +58,16 @@ public class EnrollmentStateDto {
                 .mode(SystemMode.ENROLAMIENTO.name())
                 .build();
     }
+
+    /**
+     * Crea un estado de espera de validación del admin.
+     */
+    public static EnrollmentStateDto waitingAdmin(int secondsRemaining) {
+        return EnrollmentStateDto.builder()
+                .active(true)
+                .secondsRemaining(secondsRemaining)
+                .capturedUid(null)
+                .mode(SystemMode.ESPERANDO_ADMIN.name())
+                .build();
+    }
 }
