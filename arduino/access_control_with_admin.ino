@@ -32,6 +32,7 @@ Servo torniquete;
 
 bool modoRegistro = false;
 bool esperandoAdmin = false;
+bool sesionActiva = false;   // Solo leer tags cuando Java esta conectado
 String serialBuffer = "";
 unsigned long ultimaLectura = 0;
 
@@ -112,7 +113,7 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("   SYSTEM v2");
   delay(1500);
-  mostrarEspera();
+  mostrarEsperaConexion();
 }
 
 void loop() {
@@ -127,6 +128,11 @@ void loop() {
     } else {
       serialBuffer += c;
     }
+  }
+
+  // Si no hay sesion activa con Java, no leer tags
+  if (!sesionActiva) {
+    return;
   }
 
   // COOLDOWN
@@ -177,6 +183,11 @@ void loop() {
 void procesarMensaje(String msg) {
   char cmd = msg.charAt(0);
   
+  // Cualquier comando de Java activa la sesion
+  if (!sesionActiva) {
+    sesionActiva = true;
+  }
+
   switch (cmd) {
     case 'P':
       Serial.println("PONG:ACCESS_SYSTEM_V2");
@@ -298,4 +309,11 @@ void mostrarEspera() {
   lcd.print("SISTEMA  ACTIVO");
   lcd.setCursor(0, 1);
   lcd.print("APROXIME SU TAG");
+}
+
+void mostrarEsperaConexion() {
+  lcd.clear();
+  lcd.print("   ESPERANDO");
+  lcd.setCursor(0, 1);
+  lcd.print("  CONEXION PC...");
 }

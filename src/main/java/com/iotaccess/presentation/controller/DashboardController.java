@@ -158,10 +158,8 @@ public class DashboardController {
                 return ResponseEntity.badRequest().body(response);
             }
 
-            // Detener sesión actual y reiniciar con nuevo nombre
-            String currentPort = status.getPortName();
-            accessService.stopSession();
-            accessService.startSession(currentPort, newName);
+            // Renombrar el archivo CSV existente (sin perder datos)
+            accessService.renameCurrentSession(newName);
 
             response.put("success", true);
             response.put("message", "Sesión renombrada a: " + newName);

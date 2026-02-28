@@ -108,6 +108,58 @@ public class AccessServiceImpl implements AccessService {
     }
 
     @Override
+    public synchronized void reconnectSession(String portName) {
+        // Si hay sesión activa, solo detener el serial (no el CSV)
+        if (currentSession != null && currentSession.isActive()) {
+            serialListener.stop();
+        }
+
+        // Verificar si el CSV writer aún tiene un archivo activo
+        if (!logWriter.isReady()) {
+            throw new IllegalStateException(
+                    "No hay sesión CSV previa. Use 'Iniciar sesión' en su lugar.");
+        }
+
+        log.info("⟳ Reconectando Arduino en puerto={}, continuando CSV existente", portName);
+
+        // Reiniciar el listener serial con el nuevo puerto
+        serialListener.start(portName, this::processIncomingUid);
+
+        // Reactivar la sesión con el nuevo puerto
+        if (currentSession != null) {
+            currentSession.setActive(true);
+            currentSession.setPortName(portName);
+        } else {
+            // Crear nueva sesión pero reutilizando el CSV existente
+            currentSession = CaptureSession.start(portName, "reconnected");
+            currentSession.setCsvFilePath(
+                    ((com.iotaccess.infrastructure.file.CsvAccessLogWriter) logWriter)
+                            .getCurrentFilePath());
+        }
+
+        log.info("✓ Arduino reconectado exitosamente. CSV activo: {}",
+                currentSession.getCsvFilePath());
+    }
+
+    @Override
+    public synchronized void renameCurrentSession(String newName) {
+        if (currentSession == null || !currentSession.isActive()) {
+            throw new IllegalStateException("No hay sesión activa para renombrar");
+        }
+
+        log.info("Renombrando sesión '{}' → '{}'", currentSession.getSessionName(), newName);
+
+        // Renombrar archivos CSV (principal + backup + binario)
+        String newPath = logWriter.renameFile(newName);
+
+        // Actualizar la sesión en memoria
+        currentSession.setSessionName(newName);
+        currentSession.setCsvFilePath(newPath);
+
+        log.info("✓ Sesión renombrada exitosamente: {}", newPath);
+    }
+
+    @Override
     public synchronized void stopSession() {
         if (currentSession == null || !currentSession.isActive()) {
             log.warn("No hay sesión activa para detener");

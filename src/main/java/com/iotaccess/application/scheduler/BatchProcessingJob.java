@@ -6,6 +6,7 @@ import com.iotaccess.domain.port.AccessLogReader;
 import com.iotaccess.domain.port.AccessRepository;
 import com.iotaccess.domain.port.UserRegistryPort;
 import com.iotaccess.infrastructure.file.CsvAccessLogWriter;
+import com.iotaccess.infrastructure.persistence.DatabaseBackupService;
 import com.iotaccess.infrastructure.persistence.JpaUserRepository;
 import com.iotaccess.infrastructure.persistence.entity.UserEntity;
 import com.iotaccess.presentation.websocket.AccessWebSocketHandler;
@@ -39,6 +40,7 @@ public class BatchProcessingJob {
     private final JpaUserRepository jpaUserRepository;
     private final TaskScheduler taskScheduler;
     private final CsvAccessLogWriter csvAccessLogWriter;
+    private final DatabaseBackupService databaseBackupService;
 
     @Autowired
     @Lazy
@@ -75,13 +77,15 @@ public class BatchProcessingJob {
             UserRegistryPort userRegistryPort,
             JpaUserRepository jpaUserRepository,
             TaskScheduler taskScheduler,
-            CsvAccessLogWriter csvAccessLogWriter) {
+            CsvAccessLogWriter csvAccessLogWriter,
+            DatabaseBackupService databaseBackupService) {
         this.logReader = logReader;
         this.accessRepository = accessRepository;
         this.userRegistryPort = userRegistryPort;
         this.jpaUserRepository = jpaUserRepository;
         this.taskScheduler = taskScheduler;
         this.csvAccessLogWriter = csvAccessLogWriter;
+        this.databaseBackupService = databaseBackupService;
     }
 
     /**
@@ -191,7 +195,15 @@ public class BatchProcessingJob {
                     totalErrors > 0 ? totalErrors + " archivos con errores" : null);
             notifyBatchCompleted(totalProcessed, totalErrors, totalErrors == 0);
 
-            // 4. Reabrir el CSV writer con un nuevo archivo para seguir escribiendo
+            // 4. Ejecutar backup en MySQL via stored procedure
+            try {
+                int backupCount = databaseBackupService.executeBackup();
+                log.info("Backup MySQL completado: {} registros respaldados", backupCount);
+            } catch (Exception e) {
+                log.error("Error en backup MySQL: {}", e.getMessage());
+            }
+
+            // 5. Reabrir el CSV writer con un nuevo archivo para seguir escribiendo
             reopenCsvWriter();
 
         } catch (Exception e) {

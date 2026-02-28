@@ -34,6 +34,9 @@ public class CsvAccessLogReader implements AccessLogReader {
     @Value("${csv.data-logs-path:./data_logs}")
     private String dataLogsPath;
 
+    @Value("${csv.backup-data-logs-path:./data_logs_backup}")
+    private String backupDataLogsPath;
+
     @Value("${csv.history-path:./history}")
     private String historyPath;
 
@@ -46,9 +49,24 @@ public class CsvAccessLogReader implements AccessLogReader {
     @Override
     public List<AccessRecord> readFromFile(Path filePath) {
         log.info("Leyendo archivo CSV: {}", filePath);
+
+        // ENTREGABLE 3: Si el archivo no existe, intentar con el backup
+        Path fileToRead = filePath;
+        if (!Files.exists(filePath)) {
+            log.warn("Archivo CSV no encontrado: {}. Buscando backup...", filePath);
+            Path backupFile = getBackupPathFor(filePath);
+            if (backupFile != null && Files.exists(backupFile)) {
+                log.info("Usando archivo de respaldo: {}", backupFile);
+                fileToRead = backupFile;
+            } else {
+                log.error("Ni el archivo principal ni el backup existen para: {}", filePath);
+                return new ArrayList<>();
+            }
+        }
+
         List<AccessRecord> records = new ArrayList<>();
 
-        try (CSVReader reader = new CSVReader(new FileReader(filePath.toFile()))) {
+        try (CSVReader reader = new CSVReader(new FileReader(fileToRead.toFile()))) {
             List<String[]> lines = reader.readAll();
 
             // Saltar header
@@ -60,17 +78,37 @@ public class CsvAccessLogReader implements AccessLogReader {
                     }
                 } catch (Exception e) {
                     log.warn("Error parseando línea {} del archivo {}: {}",
-                            i + 1, filePath, e.getMessage());
+                            i + 1, fileToRead, e.getMessage());
                 }
             }
 
-            log.info("Leídos {} registros del archivo {}", records.size(), filePath);
+            log.info("Leídos {} registros del archivo {}", records.size(), fileToRead);
 
         } catch (IOException | CsvException e) {
-            throw CsvProcessingException.cannotRead(filePath.toString(), e);
+            throw CsvProcessingException.cannotRead(fileToRead.toString(), e);
         }
 
         return records;
+    }
+
+    /**
+     * Obtiene la ruta del archivo de backup correspondiente a un archivo CSV
+     * principal.
+     */
+    private Path getBackupPathFor(Path primaryPath) {
+        try {
+            String fileName = primaryPath.getFileName().toString();
+            String backupFileName;
+            if (fileName.endsWith(".csv")) {
+                backupFileName = fileName.substring(0, fileName.length() - 4) + "_backup.csv";
+            } else {
+                backupFileName = fileName + "_backup";
+            }
+            return Paths.get(backupDataLogsPath).resolve(backupFileName);
+        } catch (Exception e) {
+            log.error("Error generando ruta de backup para {}: {}", primaryPath, e.getMessage());
+            return null;
+        }
     }
 
     @Override

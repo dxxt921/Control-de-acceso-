@@ -29,6 +29,15 @@ public interface AccessService {
     void startSession(String portName, String sessionName);
 
     /**
+     * Reconecta el Arduino a una sesión existente sin crear nuevo CSV.
+     * Permite continuar escribiendo en el mismo archivo después de
+     * desconectar y reconectar el Arduino.
+     *
+     * @param portName Nombre del puerto COM
+     */
+    void reconnectSession(String portName);
+
+    /**
      * Detiene la sesión de captura actual.
      */
     void stopSession();
@@ -62,6 +71,13 @@ public interface AccessService {
      * @param uid UID del tag NFC
      */
     void processIncomingUid(String uid);
+
+    /**
+     * Renombra la sesión actual (renombra el CSV sin perder datos).
+     *
+     * @param newName Nuevo nombre de sesión
+     */
+    void renameCurrentSession(String newName);
 
     /**
      * Obtiene estadísticas del día.

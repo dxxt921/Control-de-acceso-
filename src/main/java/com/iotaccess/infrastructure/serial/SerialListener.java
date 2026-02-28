@@ -13,6 +13,7 @@ import java.io.InputStreamReader;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -88,6 +89,19 @@ public class SerialListener {
 
         // Iniciar hilo de lectura
         executor.submit(this::readLoop);
+
+        // Activar el Arduino despues del reset DTR (2s de espera)
+        CompletableFuture.runAsync(() -> {
+            try {
+                Thread.sleep(2000);
+                if (running.get()) {
+                    sendCommand('A');
+                    log.info("Comando 'A' enviado al Arduino para activar sesion");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
     }
 
     /**

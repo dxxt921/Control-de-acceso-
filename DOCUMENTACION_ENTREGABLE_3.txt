@@ -1,0 +1,322 @@
+================================================================================
+          ENTREGABLE 3 - DOCUMENTACIÓN TÉCNICA PARA EL EQUIPO
+          IoT Access System - Smart Access DB
+          Fecha: 21 de Febrero de 2026
+================================================================================
+
+¡LEAN ESTO COMPLETO! Aquí se explica TODO lo nuevo que se implementó para que
+puedan responder si el profesor pregunta.
+
+================================================================================
+  1. ¿QUÉ SE IMPLEMENTÓ EN RESUMEN?
+================================================================================
+
+Se agregaron 5 funcionalidades nuevas al sistema:
+
+  A) TRIGGER en la base de datos MySQL
+  B) STORED PROCEDURES (procedimientos almacenados) en MySQL
+  C) BACKUP de la base de datos (tabla de respaldo)
+  D) CSV de respaldo (cada archivo CSV se duplica automáticamente)
+  E) Resiliencia ante borrado de CSV (si borran el CSV, se recupera solo)
+  F) Archivo binario oculto que guarda el nombre del CSV activo
+
+================================================================================
+  2. BASE DE DATOS - TRIGGER
+================================================================================
+
+¿Qué es un Trigger?
+  Un trigger es un evento automático que se ejecuta en la base de datos cada vez
+  que ocurre una acción específica (INSERT, UPDATE o DELETE) en una tabla.
+
+¿Qué trigger creamos?
+  Nombre: trg_after_access_insert
+  Tabla:  access_logs
+  Tipo:   AFTER INSERT (se ejecuta DESPUÉS de cada inserción)
+
+¿Qué hace?
+  Cada vez que se inserta un nuevo registro de acceso en la tabla "access_logs"
+  (por ejemplo, cuando alguien escanea su tarjeta NFC), el trigger
+  AUTOMÁTICAMENTE crea un registro en la tabla "access_audit_log" con:
+    - Tipo de acción ("INSERT")
+    - El UID de la tarjeta detectada
+    - Si el acceso fue concedido o denegado
+    - La estación donde se escaneó
+    - La fecha/hora original del acceso
+    - La fecha/hora de la auditoría
+    - Una descripción legible, por ejemplo:
+      "Nuevo registro de acceso - UID: CB-34-F8-5 - Acceso: CONCEDIDO"
+
+¿Dónde está el código?
+  Archivo: src/main/resources/schema-entregable3.sql (líneas 33-57)
+  Archivo manual: src/main/resources/schema-entregable3-manual.sql
+
+¿Cómo verificarlo?
+  En MySQL Workbench ejecutar:
+    SHOW TRIGGERS FROM smart_access_db;
+    SELECT * FROM access_audit_log;
+
+================================================================================
+  3. BASE DE DATOS - STORED PROCEDURES
+================================================================================
+
+¿Qué es un Stored Procedure?
+  Es una función guardada dentro de la base de datos que se puede llamar
+  cuando se necesite. Es como una función de programación pero vive en MySQL.
+
+Stored Procedure 1: sp_backup_access_logs
+  ¿Qué hace?
+    Copia TODOS los registros de la tabla "access_logs" a la tabla
+    "access_logs_backup". Solo copia los que no se hayan copiado antes
+    (evita duplicados).
+
+  ¿Cuándo se ejecuta?
+    - Automáticamente cada día cuando se ejecuta el proceso batch (a las 10 PM)
+    - También se puede ejecutar manualmente desde MySQL:
+        CALL sp_backup_access_logs();
+
+Stored Procedure 2: sp_daily_stats
+  ¿Qué hace?
+    Devuelve las estadísticas del día actual:
+    - Total de accesos
+    - Accesos concedidos
+    - Accesos denegados
+    - Usuarios únicos que escanearon
+    - Primer acceso del día
+    - Último acceso del día
+
+  ¿Cómo probarlo?
+    En MySQL Workbench:
+      CALL sp_daily_stats();
+
+¿Dónde está el código?
+  SQL: src/main/resources/schema-entregable3.sql
+  Java que los llama: src/main/java/.../infrastructure/persistence/DatabaseBackupService.java
+
+================================================================================
+  4. BASE DE DATOS - TABLAS NUEVAS
+================================================================================
+
+Se crearon 2 tablas nuevas:
+
+  Tabla 1: access_audit_log
+    - Guarda el historial de AUDITORÍA de cada inserción
+    - Se llena AUTOMÁTICAMENTE por el trigger
+    - Columnas: audit_id, action_type, uid_detected, access_granted,
+                station_id, original_timestamp, audit_timestamp, audit_description
+
+  Tabla 2: access_logs_backup
+    - Es la copia de respaldo de access_logs
+    - Se llena cuando se ejecuta el stored procedure sp_backup_access_logs
+    - Columnas: backup_id, original_id, uid_detected, access_timestamp,
+                access_granted, station_id, backup_timestamp
+
+¿Cómo verificarlo?
+  En MySQL Workbench:
+    SHOW TABLES LIKE 'access%';
+    SELECT * FROM access_audit_log;
+    SELECT * FROM access_logs_backup;
+
+================================================================================
+  5. CSV DE RESPALDO
+================================================================================
+
+¿Cómo funciona?
+  Antes, cuando se escaneaba una tarjeta, el dato se guardaba en UN solo
+  archivo CSV en la carpeta "data_logs/".
+
+  AHORA, cada dato se guarda en DOS archivos al mismo tiempo:
+    - CSV principal:  ./data_logs/sesion_2026-02-21.csv
+    - CSV de respaldo: ./data_logs_backup/sesion_2026-02-21_backup.csv
+
+  Lo mismo pasa con el registro de usuarios:
+    - Principal: ./data_logs/user_registry.csv
+    - Respaldo:  ./data_logs_backup/user_registry_backup.csv
+
+¿Para qué sirve?
+  Si por alguna razón el archivo CSV principal se borra o se corrompe,
+  el sistema tiene una copia exacta en la carpeta de respaldo.
+
+¿Dónde está el código?
+  - CsvAccessLogWriter.java → método write() escribe a ambos archivos
+  - CsvUserRegistryAdapter.java → método saveToFile() guarda en ambos
+
+================================================================================
+  6. RESILIENCIA - RECUPERACIÓN AUTOMÁTICA DEL CSV
+================================================================================
+
+ESTA ES LA FUNCIÓN MÁS IMPORTANTE DEL ENTREGABLE.
+
+¿Qué pasa si el profesor borra el CSV mientras el programa está corriendo?
+  1. El usuario escanea su tarjeta NFC
+  2. El sistema intenta escribir al CSV principal
+  3. El sistema detecta que el archivo NO EXISTE (fue borrado)
+  4. El sistema COPIA el CSV de respaldo al lugar del CSV principal
+  5. El sistema escribe el nuevo registro
+  6. El programa NUNCA se crashea
+
+  Esto funciona así:
+    → Antes de cada escritura, se verifica si el archivo existe
+    → Si no existe, se restaura del backup automáticamente
+    → Si ni el backup existe, se crea un archivo nuevo con el header
+
+  También hay un servicio que cada 30 segundos revisa si los CSV existen.
+
+¿Cómo demostrarlo al profesor?
+  1. Iniciar la app y una sesión
+  2. Escanear 2-3 tarjetas (ver que el CSV tiene datos)
+  3. IR AL EXPLORADOR DE ARCHIVOS y borrar el CSV de data_logs/
+  4. Escanear otra tarjeta
+  5. Abrir el CSV de nuevo → APARECE RESTAURADO con todos los datos anteriores
+     más el nuevo registro
+
+  El programa NUNCA se cierra, NUNCA da error. Se recupera solo.
+
+¿Dónde está el código?
+  - CsvAccessLogWriter.java → método recoverPrimaryFromBackup()
+  - CsvResilienceService.java → verificación periódica cada 30 segundos
+  - CsvAccessLogReader.java → fallback al leer archivos
+
+================================================================================
+  7. ARCHIVO BINARIO OCULTO
+================================================================================
+
+¿Qué es?
+  Es un archivo llamado ".file_tracker.dat" que se guarda en data_logs/.
+  Este archivo guarda el NOMBRE del CSV activo en formato BINARIO.
+
+¿Por qué binario?
+  Porque el profesor pidió que el nombre del archivo se guarde pero que
+  "no se vea" y "esté en binario". Si abres el archivo .dat con un editor
+  de texto, no se puede leer porque está en formato binario.
+
+¿Qué contiene por dentro?
+  - Un "magic number" (0x494F5446 = "IOTF") para identificar el formato
+  - La versión del formato (1)
+  - Un timestamp de cuándo se guardó
+  - El nombre del archivo CSV activo (codificado en binario con DataOutputStream)
+
+¿Cómo se ve?
+  El archivo es OCULTO (tiene el atributo de archivo oculto de Windows).
+  Para verlo, hay que activar "Mostrar archivos ocultos" en el explorador.
+  Si lo abres con un editor de texto, verás caracteres ilegibles (binario).
+
+¿Dónde está el código?
+  - BinaryFileTracker.java → métodos saveFileName() y readFileName()
+  - Se integra en CsvAccessLogWriter.java → en initialize()
+
+================================================================================
+  8. INTEGRACIÓN CON EL BATCH
+================================================================================
+
+¿Qué cambió en el proceso batch?
+  Antes el batch solo movía archivos CSV a la base de datos.
+
+  Ahora ADEMÁS ejecuta el stored procedure sp_backup_access_logs
+  después de procesar los archivos, creando un respaldo en MySQL también.
+
+  Flujo del batch:
+    1. Sincronizar usuarios CSV → MySQL
+    2. Procesar archivos CSV pendientes → insertar en MySQL
+    3. NUEVO: Ejecutar sp_backup_access_logs (backup en MySQL)
+    4. Reabrir el CSV writer para seguir escribiendo
+
+¿Dónde está el código?
+  - BatchProcessingJob.java → método processDailyBatch()
+  - DatabaseBackupService.java → método executeBackup()
+
+================================================================================
+  9. ARCHIVOS NUEVOS CREADOS
+================================================================================
+
+  Archivo                           | Qué hace
+  ----------------------------------|------------------------------------------
+  schema-entregable3.sql            | Trigger, stored procedures, tablas (auto)
+  schema-entregable3-manual.sql     | Lo mismo pero para MySQL Workbench
+  BinaryFileTracker.java            | Archivo binario oculto con nombre del CSV
+  DatabaseBackupService.java        | Llama a los stored procedures desde Java
+  CsvResilienceService.java         | Verifica cada 30s que los CSV existan
+
+================================================================================
+  10. ARCHIVOS MODIFICADOS
+================================================================================
+
+  Archivo                           | Qué se cambió
+  ----------------------------------|------------------------------------------
+  CsvAccessLogWriter.java           | Escritura dual + resiliencia + binario
+  CsvUserRegistryAdapter.java       | Escritura dual + carga desde backup
+  CsvAccessLogReader.java           | Lectura con fallback al backup
+  BatchProcessingJob.java           | Ejecuta backup MySQL después del batch
+  application.properties            | Rutas de backup, config SQL init
+
+================================================================================
+  11. CONFIGURACIÓN EN application.properties
+================================================================================
+
+  Se agregaron estas propiedades:
+
+  # Ejecutar el script SQL al arrancar la app
+  spring.sql.init.mode=always
+  spring.sql.init.schema-locations=classpath:schema-entregable3.sql
+  spring.sql.init.separator=;;
+  spring.sql.init.continue-on-error=true
+
+  # Rutas de los archivos de respaldo
+  csv.backup-data-logs-path=./data_logs_backup
+  csv.backup-user-registry-path=./data_logs_backup/user_registry_backup.csv
+  csv.binary-tracker-path=./data_logs/.file_tracker.dat
+
+================================================================================
+  12. ESTRUCTURA DE CARPETAS (RESULTADO)
+================================================================================
+
+  iot-access-system/
+  ├── data_logs/                          ← Archivos CSV principales
+  │   ├── sesion_2026-02-21.csv           ← CSV de accesos (principal)
+  │   ├── user_registry.csv               ← Registro de usuarios (principal)
+  │   └── .file_tracker.dat               ← Archivo binario oculto
+  │
+  ├── data_logs_backup/                   ← Archivos CSV de respaldo
+  │   ├── sesion_2026-02-21_backup.csv    ← CSV de accesos (respaldo)
+  │   └── user_registry_backup.csv        ← Registro de usuarios (respaldo)
+  │
+  └── history/                            ← CSVs procesados por el batch
+
+================================================================================
+  13. PREGUNTAS QUE PODRÍA HACER EL PROFESOR Y CÓMO RESPONDER
+================================================================================
+
+P: ¿Qué trigger implementaron?
+R: Un trigger AFTER INSERT en la tabla access_logs que registra cada
+   inserción en una tabla de auditoría llamada access_audit_log.
+
+P: ¿Para qué sirve el trigger?
+R: Para llevar un registro automático de auditoría. Cada vez que se
+   registra un acceso, el trigger guarda quién accedió, si fue concedido
+   o denegado, y una descripción legible.
+
+P: ¿Qué stored procedures tienen?
+R: Dos: sp_backup_access_logs que hace respaldo de los registros en
+   una tabla aparte, y sp_daily_stats que retorna las estadísticas
+   del día (total accesos, concedidos, denegados, usuarios únicos).
+
+P: ¿Dónde se guarda el nombre del archivo?
+R: En un archivo binario oculto llamado .file_tracker.dat dentro de
+   data_logs/. Está en formato binario, no se puede leer con un editor
+   de texto normal.
+
+P: ¿Qué pasa si borro el CSV mientras el programa corre?
+R: El programa NO se crashea. Cuando intenta escribir el siguiente
+   registro, detecta que el archivo no existe, lo restaura desde el
+   CSV de respaldo en data_logs_backup/, y sigue funcionando normal.
+
+P: ¿Los datos se guardan en tiempo real?
+R: Sí, cada escaneo de tarjeta se escribe inmediatamente en el CSV.
+   No hay que esperar a cerrar la sesión para ver los datos.
+
+P: ¿Dónde está el respaldo?
+R: En dos lugares: en la carpeta data_logs_backup/ (respaldo CSV)
+   y en la tabla access_logs_backup de MySQL (respaldo en la BD).
+
+================================================================================
+              FIN DE LA DOCUMENTACIÓN - ¡LÉANLA TODA!
+================================================================================

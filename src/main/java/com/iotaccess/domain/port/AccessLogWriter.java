@@ -39,4 +39,12 @@ public interface AccessLogWriter {
      * @return true si está listo
      */
     boolean isReady();
+
+    /**
+     * Renombra el archivo CSV activo (y su backup) sin perder datos.
+     *
+     * @param newSessionName Nuevo nombre de sesión
+     * @return Nueva ruta del archivo
+     */
+    String renameFile(String newSessionName);
 }

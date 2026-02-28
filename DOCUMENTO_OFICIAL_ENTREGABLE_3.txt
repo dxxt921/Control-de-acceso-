@@ -1,0 +1,721 @@
+================================================================================
+                  ENTREGABLE 3 - DOCUMENTO OFICIAL
+              SISTEMA DE CONTROL DE ACCESO IoT (Smart Access)
+                     Semana del 17 al 21 de Febrero 2026
+================================================================================
+
+
+================================================================================
+  SECCIÓN 1: DESCRIPCIÓN DEL AVANCE PLANEADO PARA ESTA SEMANA
+================================================================================
+
+Para el entregable 3 se planeó implementar las siguientes funcionalidades al
+sistema de control de acceso IoT:
+
+  1. Integración de objetos de base de datos avanzados:
+     - Creación de un TRIGGER (disparador) que se active automáticamente al
+       insertar registros de acceso en la tabla principal.
+     - Creación de STORED PROCEDURES (procedimientos almacenados) para
+       realizar respaldos de la base de datos y consultar estadísticas.
+     - Creación de tablas auxiliares para auditoría y respaldo.
+
+  2. Implementación de un mecanismo de respaldo CSV paralelo:
+     - Cada archivo CSV generado por el sistema ahora se escribe en dos
+       ubicaciones simultáneamente: el directorio principal y un directorio
+       de respaldo.
+
+  3. Almacenamiento del nombre del archivo CSV activo en un archivo binario:
+     - El nombre del archivo CSV en uso se almacena en un archivo con formato
+       binario (.file_tracker.dat) que no es legible con editores de texto
+       convencionales.
+
+  4. Resiliencia ante pérdida de archivos CSV:
+     - Si el archivo CSV principal es eliminado accidentalmente mientras el
+       sistema está en ejecución, el programa lo detecta automáticamente y
+       lo restaura a partir del archivo de respaldo sin interrupción del
+       servicio.
+
+Todos los avances fueron implementados exitosamente y probados de forma
+funcional durante la semana.
+
+
+================================================================================
+  SECCIÓN 2: DESCRIPCIÓN ESQUEMÁTICA DE LA ARQUITECTURA
+================================================================================
+
+2.1 ARQUITECTURA GENERAL DEL SISTEMA
+-------------------------------------
+
+El sistema utiliza una arquitectura hexagonal (puertos y adaptadores) con las
+siguientes capas:
+
+  ┌─────────────────────────────────────────────────┐
+  │                 PRESENTACIÓN                     │
+  │  (Dashboard Web + WebSocket en tiempo real)      │
+  ├─────────────────────────────────────────────────┤
+  │                  APLICACIÓN                      │
+  │  (AccessServiceImpl, BatchProcessingJob)         │
+  ├─────────────────────────────────────────────────┤
+  │                    DOMINIO                       │
+  │  (Modelos: AccessRecord, RegisteredUser)         │
+  │  (Puertos: AccessLogWriter, AccessLogReader)     │
+  ├─────────────────────────────────────────────────┤
+  │                INFRAESTRUCTURA                   │
+  │  ┌──────────────┐    ┌──────────────────────┐   │
+  │  │  Archivos    │    │  Base de Datos       │   │
+  │  │  CSV/Binario │    │  MySQL (JPA)         │   │
+  │  └──────────────┘    └──────────────────────┘   │
+  │  ┌──────────────┐    ┌──────────────────────┐   │
+  │  │  Puerto      │    │  Respaldo/           │   │
+  │  │  Serial      │    │  Resiliencia         │   │
+  │  └──────────────┘    └──────────────────────┘   │
+  └─────────────────────────────────────────────────┘
+
+
+2.2 MANEJO DE ARCHIVOS
+-----------------------
+
+El sistema maneja los siguientes archivos:
+
+  Tipo de Archivo           │ Ubicación                  │ Propósito
+  ──────────────────────────┼────────────────────────────┼─────────────────────
+  CSV de accesos (principal)│ ./data_logs/               │ Registro de accesos
+  CSV de accesos (respaldo) │ ./data_logs_backup/        │ Copia de seguridad
+  CSV de usuarios           │ ./data_logs/               │ Registro de usuarios
+  CSV de usuarios (respaldo)│ ./data_logs_backup/        │ Copia de seguridad
+  Archivo binario           │ ./data_logs/.file_tracker  │ Nombre del CSV activo
+  CSVs procesados           │ ./history/                 │ Archivos ya enviados a BD
+
+Flujo de escritura de archivos:
+
+  Escanear tarjeta NFC
+       │
+       ▼
+  CsvAccessLogWriter.write()
+       │
+       ├──► Escribir al CSV principal (data_logs/)
+       │         │
+       │         ▼
+       │    Abrir archivo → Escribir línea → Cerrar archivo
+       │    (No mantiene el archivo bloqueado)
+       │
+       └──► Escribir al CSV de respaldo (data_logs_backup/)
+                 │
+                 ▼
+            Abrir archivo → Escribir línea → Cerrar archivo
+
+  NOTA: Se utiliza el patrón "open-write-close" en cada escritura. Esto
+  significa que el archivo se abre, se escribe una línea y se cierra
+  inmediatamente. Esto permite que el archivo CSV pueda ser leído, copiado
+  o incluso borrado por otro programa (o el usuario) mientras la aplicación
+  está en ejecución.
+
+
+2.3 CONFIGURACIÓN DEL PUERTO SERIAL
+-------------------------------------
+
+El sistema se comunica con el Arduino a través de un puerto serial (COM).
+La configuración se establece desde el dashboard web:
+
+  Parámetro         │ Valor por defecto  │ Dónde se configura
+  ──────────────────┼────────────────────┼──────────────────────
+  Puerto            │ (seleccionable)    │ Dashboard web
+  Baud Rate         │ 115200             │ application.properties
+  Data Bits         │ 8                  │ Código (SerialPortAdapter)
+  Stop Bits         │ 1                  │ Código (SerialPortAdapter)
+  Timeout           │ 2000ms             │ application.properties
+
+Fragmento de configuración (application.properties):
+
+  # Puerto serial
+  serial.baud-rate=115200
+  serial.timeout-ms=2000
+  serial.read-buffer-size=1024
+
+El puerto serial se selecciona desde la interfaz web. El sistema lista todos
+los puertos COM disponibles y el usuario elige cuál usar.
+
+
+2.4 NOMBRE DEL ARCHIVO Y TIEMPO DE EJECUCIÓN
+----------------------------------------------
+
+Formato del nombre del archivo CSV:
+  [nombre_sesion]_[fecha].csv
+
+  Ejemplo: Prueba21_2026-02-21.csv
+
+  - nombre_sesion: Lo elige el usuario al iniciar sesión desde el dashboard.
+  - fecha: Se genera automáticamente con la fecha del día (yyyy-MM-dd).
+
+El nombre se almacena en el archivo binario .file_tracker.dat para poder
+recuperarlo si es necesario.
+
+Proceso de segundo plano (Batch Processing):
+  - Se programa a las 22:00 (10 PM) todos los días.
+  - Puede ejecutarse manualmente desde el dashboard.
+  - El batch toma los archivos CSV pendientes, los lee, inserta los
+    registros en MySQL, y mueve los archivos procesados a ./history/.
+  - Configuración en application.properties:
+      batch.cron.expression=0 0 22 * * ?
+      operation.start-hour=6
+      operation.end-hour=23
+
+
+================================================================================
+  SECCIÓN 3: PROCESO DE RESPALDO DEL ARCHIVO CSV
+================================================================================
+
+3.1 ESCRITURA SIMULTÁNEA (CSV PRINCIPAL + RESPALDO)
+-----------------------------------------------------
+
+Cada vez que se registra un acceso (escaneo de tarjeta NFC), el sistema
+escribe el dato en DOS archivos CSV al mismo tiempo:
+
+  1. Archivo principal: ./data_logs/sesion_2026-02-21.csv
+  2. Archivo de respaldo: ./data_logs_backup/sesion_2026-02-21_backup.csv
+
+Código relevante (CsvAccessLogWriter.java - método write):
+
+  ┌────────────────────────────────────────────────────────────────────┐
+  │  public void write(AccessRecord record) {                         │
+  │      synchronized (writeLock) {                                   │
+  │          String line = formatRecord(record);                      │
+  │          Path primaryPath = Paths.get(currentFilePath);           │
+  │          Path backupPath = Paths.get(currentBackupFilePath);      │
+  │                                                                    │
+  │          // RESILIENCIA: Verificar que el CSV principal existe     │
+  │          if (!Files.exists(primaryPath)) {                        │
+  │              recoverPrimaryFromBackup();                           │
+  │          }                                                         │
+  │                                                                    │
+  │          // Escribir al CSV principal                              │
+  │          writeLineToFile(primaryPath, line, true);                 │
+  │                                                                    │
+  │          // Escribir al CSV de respaldo                            │
+  │          writeLineToFile(backupPath, line, true);                  │
+  │      }                                                             │
+  │  }                                                                 │
+  └────────────────────────────────────────────────────────────────────┘
+
+Lo mismo aplica al registro de usuarios (CsvUserRegistryAdapter.java):
+cuando se registra un nuevo usuario, el archivo user_registry.csv se
+guarda tanto en la carpeta principal como en la carpeta de respaldo.
+
+
+3.2 ALMACENAMIENTO EN ARCHIVO BINARIO (.file_tracker.dat)
+-----------------------------------------------------------
+
+El nombre del archivo CSV activo se almacena en un archivo binario oculto
+ubicado en ./data_logs/.file_tracker.dat
+
+Estructura del archivo binario:
+
+  Posición  │ Tipo    │ Valor                    │ Descripción
+  ──────────┼─────────┼──────────────────────────┼──────────────────────
+  0-3       │ int     │ 0x494F5446 ("IOTF")      │ Magic number
+  4-7       │ int     │ 1                        │ Versión del formato
+  8-15      │ long    │ (timestamp en millis)    │ Fecha de creación
+  16+       │ UTF     │ "data_logs/sesion..."    │ Nombre del archivo
+
+El archivo tiene el atributo de "oculto" en Windows, por lo que no se ve
+en el explorador de archivos a menos que se active "Mostrar archivos ocultos".
+
+Código relevante (BinaryFileTracker.java):
+
+  ┌────────────────────────────────────────────────────────────────────┐
+  │  public void saveFileName(String fileName) {                      │
+  │      Path trackerPath = Paths.get(binaryTrackerPath);             │
+  │      try (DataOutputStream dos = new DataOutputStream(            │
+  │              new FileOutputStream(trackerPath.toFile()))) {       │
+  │                                                                    │
+  │          dos.writeInt(MAGIC_NUMBER);   // 0x494F5446              │
+  │          dos.writeInt(VERSION);         // 1                      │
+  │          dos.writeLong(System.currentTimeMillis());               │
+  │          dos.writeUTF(fileName);                                  │
+  │      }                                                             │
+  │      // Establecer archivo como oculto en Windows                 │
+  │      Files.setAttribute(trackerPath, "dos:hidden", Boolean.TRUE); │
+  │  }                                                                 │
+  └────────────────────────────────────────────────────────────────────┘
+
+  ┌────────────────────────────────────────────────────────────────────┐
+  │  public String readFileName() {                                   │
+  │      Path trackerPath = Paths.get(binaryTrackerPath);             │
+  │      try (DataInputStream dis = new DataInputStream(              │
+  │              new FileInputStream(trackerPath.toFile()))) {        │
+  │                                                                    │
+  │          int magic = dis.readInt();                                │
+  │          if (magic != MAGIC_NUMBER) {                              │
+  │              throw new IOException("Formato no válido");          │
+  │          }                                                         │
+  │          int version = dis.readInt();                              │
+  │          long timestamp = dis.readLong();                          │
+  │          return dis.readUTF();                                    │
+  │      }                                                             │
+  │  }                                                                 │
+  └────────────────────────────────────────────────────────────────────┘
+
+
+3.3 RESILIENCIA: RECUPERACIÓN AUTOMÁTICA DEL CSV
+--------------------------------------------------
+
+Si el archivo CSV principal es borrado mientras el programa está en ejecución,
+el sistema lo detecta y lo restaura automáticamente.
+
+Existen DOS mecanismos de detección:
+
+  Mecanismo 1: Verificación antes de cada escritura
+  ──────────────────────────────────────────────────
+  Antes de escribir un nuevo registro al CSV, el método write() verifica
+  si el archivo existe. Si fue borrado, llama a recoverPrimaryFromBackup().
+
+  Mecanismo 2: Verificación periódica cada 30 segundos
+  ──────────────────────────────────────────────────────
+  El servicio CsvResilienceService ejecuta un chequeo cada 30 segundos
+  para verificar que los archivos CSV principales existan.
+
+Flujo de recuperación:
+
+  Escritura de registro
+       │
+       ▼
+  ¿Existe el CSV principal?
+       │
+   SÍ ─┤── NO ──► recoverPrimaryFromBackup()
+       │                    │
+       │                    ▼
+       │          ¿Existe el CSV de respaldo?
+       │                    │
+       │              SÍ ───┤── NO ──► Crear CSV nuevo con header
+       │                    │
+       │                    ▼
+       │          Copiar backup → principal
+       │                    │
+       │                    ▼
+       ▼                    │
+  Escribir registro ◄──────┘
+
+Código relevante (CsvAccessLogWriter.java - método recoverPrimaryFromBackup):
+
+  ┌────────────────────────────────────────────────────────────────────┐
+  │  private void recoverPrimaryFromBackup() {                        │
+  │      Path primaryPath = Paths.get(currentFilePath);               │
+  │      Path backupPath = Paths.get(currentBackupFilePath);          │
+  │                                                                    │
+  │      if (Files.exists(backupPath)) {                              │
+  │          Files.copy(backupPath, primaryPath,                      │
+  │                     StandardCopyOption.REPLACE_EXISTING);         │
+  │          log.info("CSV principal restaurado desde respaldo");     │
+  │      } else {                                                     │
+  │          // Si no hay backup, crear archivo nuevo con header      │
+  │          writeLineToFile(primaryPath, CSV_HEADER, false);         │
+  │      }                                                             │
+  │  }                                                                 │
+  └────────────────────────────────────────────────────────────────────┘
+
+Código del servicio de resiliencia (CsvResilienceService.java):
+
+  ┌────────────────────────────────────────────────────────────────────┐
+  │  @Scheduled(fixedDelay = 30000) // Cada 30 segundos               │
+  │  public void periodicCheck() {                                    │
+  │      // Verificar CSV de accesos                                  │
+  │      if (csvAccessLogWriter.isReady()) {                          │
+  │          String primaryPath = csvAccessLogWriter                  │
+  │                                  .getCurrentFilePath();           │
+  │          String backupPath = csvAccessLogWriter                   │
+  │                                  .getCurrentBackupFilePath();     │
+  │          verifyAndRecover(primaryPath, backupPath, "access_logs");│
+  │      }                                                             │
+  │                                                                    │
+  │      // Verificar user_registry                                   │
+  │      verifyAndRecover(userRegistryPath,                           │
+  │                       backupUserRegistryPath, "user_registry");   │
+  │  }                                                                 │
+  └────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+  SECCIÓN 4: CÓDIGO DE LA INTERFAZ REALIZADA
+================================================================================
+
+4.1 DASHBOARD WEB (INTERFAZ PRINCIPAL)
+----------------------------------------
+
+La interfaz web se accede desde http://localhost:8080 y está construida con:
+  - Backend: Spring Boot (Java 17)
+  - Frontend: HTML + JavaScript + CSS
+  - Plantillas: Thymeleaf
+  - Comunicación en tiempo real: WebSocket
+
+Funcionalidades del Dashboard:
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  DASHBOARD - IoT Access System                                  │
+  ├─────────────────────────────────────────────────────────────────┤
+  │                                                                 │
+  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+  │  │ Total    │  │Permitidos│  │Denegados │  │ Último   │      │
+  │  │ Accesos  │  │          │  │          │  │ Acceso   │      │
+  │  │   XX     │  │   XX     │  │   XX     │  │ HH:MM:SS │      │
+  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘      │
+  │                                                                 │
+  │  ┌─────────── Estado del Sistema ──────────────────────┐      │
+  │  │ Serial Listener: ● Activo/Inactivo                   │      │
+  │  │ Proceso Batch: Programado a las XX:XX                │      │
+  │  │ Usuarios: X registrados                               │      │
+  │  │ Clientes WS: X conectados                             │      │
+  │  └──────────────────────────────────────────────────────┘      │
+  │                                                                 │
+  │  ┌─────────── Gestión de Dispositivos ─────────────────┐      │
+  │  │ ID (UID)  │ Nombre │ Fecha de Alta │ Acciones       │      │
+  │  │ XX-XX-XX  │ Juan   │ 2026-02-21    │ [Eliminar]     │      │
+  │  │                  [ESCANEAR NUEVO]                     │      │
+  │  └──────────────────────────────────────────────────────┘      │
+  │                                                                 │
+  │  ┌─────────── Registro de Accesos en Tiempo Real ──────┐      │
+  │  │ Hora     │ UID       │ Usuario   │ Estado            │      │
+  │  │ 15:38:02 │ CB-34-F8  │ Leonardo  │ ● Permitido       │      │
+  │  │ 15:38:53 │ CB-34-F8  │ Leonardo  │ ● Permitido       │      │
+  │  └──────────────────────────────────────────────────────┘      │
+  │                                                                 │
+  └─────────────────────────────────────────────────────────────────┘
+
+Descripción de funciones principales:
+
+  1. CONTADORES EN TIEMPO REAL
+     Se actualizan automáticamente por WebSocket cada vez que se escanea
+     una tarjeta. Muestran total de accesos, permitidos, denegados y
+     la hora del último acceso.
+
+  2. ESTADO DEL SISTEMA
+     Indica si el listener serial está activo, el estado del batch,
+     la cantidad de usuarios registrados y clientes WebSocket conectados.
+
+  3. GESTIÓN DE DISPOSITIVOS
+     Tabla con todos los usuarios registrados. Se pueden eliminar o
+     agregar nuevos escaneando una tarjeta NFC y asignándole un nombre.
+     El registro requiere verificación con la tarjeta de administrador.
+
+  4. REGISTRO DE ACCESOS EN TIEMPO REAL
+     Tabla que muestra cada escaneo de tarjeta conforme ocurre, sin
+     necesidad de recargar la página.
+
+
+4.2 CÓDIGO DEL SERVICIO PRINCIPAL (AccessServiceImpl.java)
+------------------------------------------------------------
+
+Este es el servicio central que orquesta todo el flujo de acceso:
+
+  ┌────────────────────────────────────────────────────────────────────┐
+  │  @Service                                                         │
+  │  public class AccessServiceImpl implements AccessService {        │
+  │                                                                    │
+  │      // Procesar UID leído del sensor NFC:                        │
+  │      public void processIncomingUid(String uid) {                 │
+  │          // 1. Verificar si es tarjeta de admin                   │
+  │          // 2. Si hay modo enrollment activo, registrar usuario   │
+  │          // 3. Si no, verificar si el usuario está registrado     │
+  │          // 4. Crear registro de acceso (GRANTED o DENIED)        │
+  │          // 5. Escribir al CSV (principal + respaldo)             │
+  │          // 6. Guardar en base de datos MySQL                     │
+  │          // 7. Notificar por WebSocket al dashboard               │
+  │      }                                                             │
+  │                                                                    │
+  │      // Iniciar una sesión de monitoreo:                          │
+  │      public void startSession(String portName, String session) {  │
+  │          // 1. Inicializar archivo CSV (crea principal + respaldo)│
+  │          // 2. Abrir puerto serial                                │
+  │          // 3. Comenzar a escuchar tarjetas NFC                   │
+  │      }                                                             │
+  │                                                                    │
+  │      // Detener sesión:                                           │
+  │      public void stopSession() {                                  │
+  │          // 1. Cerrar puerto serial                               │
+  │          // 2. Cerrar escritores CSV                              │
+  │      }                                                             │
+  │  }                                                                 │
+  └────────────────────────────────────────────────────────────────────┘
+
+
+4.3 CÓDIGO DEL SERVICIO DE BACKUP EN BASE DE DATOS (DatabaseBackupService.java)
+---------------------------------------------------------------------------------
+
+  ┌────────────────────────────────────────────────────────────────────┐
+  │  @Service                                                         │
+  │  public class DatabaseBackupService {                             │
+  │                                                                    │
+  │      @Autowired                                                   │
+  │      private JdbcTemplate jdbcTemplate;                           │
+  │                                                                    │
+  │      // Ejecutar stored procedure de backup                       │
+  │      public int executeBackup() {                                 │
+  │          Map<String, Object> result =                              │
+  │              jdbcTemplate.queryForMap(                             │
+  │                  "CALL sp_backup_access_logs()");                 │
+  │          return ((Number) result                                  │
+  │              .get("registros_respaldados")).intValue();            │
+  │      }                                                             │
+  │                                                                    │
+  │      // Ejecutar stored procedure de estadísticas                 │
+  │      public Map<String, Object> getDailyStats() {                │
+  │          return jdbcTemplate.queryForMap(                          │
+  │              "CALL sp_daily_stats()");                             │
+  │      }                                                             │
+  │  }                                                                 │
+  └────────────────────────────────────────────────────────────────────┘
+
+
+4.4 PANTALLAS DEMOSTRATIVAS
+-----------------------------
+
+  [Aquí colocar las capturas de pantalla que ya tiene el equipo]
+
+  Pantalla 1: Dashboard principal mostrando contadores y estado del sistema
+  Pantalla 2: Tabla de gestión de dispositivos con usuarios registrados
+  Pantalla 3: Registro de accesos en tiempo real con escaneos
+  Pantalla 4: Archivos CSV generados (principal y respaldo)
+  Pantalla 5: Archivo binario .file_tracker.dat visible en explorador
+  Pantalla 6: MySQL Workbench mostrando tablas, trigger y stored procedures
+  Pantalla 7: Demostración de resiliencia (borrar CSV y ver recuperación)
+
+
+================================================================================
+  SECCIÓN 5: TRIGGER Y PROCEDIMIENTO ALMACENADO
+================================================================================
+
+5.1 TRIGGER: trg_after_access_insert
+--------------------------------------
+
+Propósito: Registrar automáticamente cada inserción en access_logs en una
+tabla de auditoría para mantener un historial completo de operaciones.
+
+Tipo: AFTER INSERT
+Tabla: access_logs
+Tabla destino: access_audit_log
+
+Código SQL:
+
+  ┌────────────────────────────────────────────────────────────────────┐
+  │  CREATE TRIGGER trg_after_access_insert                           │
+  │  AFTER INSERT ON access_logs                                      │
+  │  FOR EACH ROW                                                     │
+  │  BEGIN                                                             │
+  │      INSERT INTO access_audit_log (                               │
+  │          action_type,                                              │
+  │          uid_detected,                                             │
+  │          access_granted,                                           │
+  │          station_id,                                               │
+  │          original_timestamp,                                       │
+  │          audit_timestamp,                                          │
+  │          audit_description                                         │
+  │      ) VALUES (                                                    │
+  │          'INSERT',                                                 │
+  │          NEW.uid_detected,                                         │
+  │          NEW.access_granted,                                       │
+  │          NEW.station_id,                                           │
+  │          NEW.access_timestamp,                                     │
+  │          NOW(),                                                    │
+  │          CONCAT('Nuevo registro de acceso - UID: ',               │
+  │                 NEW.uid_detected,                                  │
+  │                 ' - Acceso: ',                                     │
+  │                 IF(NEW.access_granted, 'CONCEDIDO', 'DENEGADO'))  │
+  │      );                                                            │
+  │  END                                                               │
+  └────────────────────────────────────────────────────────────────────┘
+
+Funcionamiento:
+  1. Un usuario escanea su tarjeta NFC en el lector.
+  2. El sistema registra el acceso en la tabla access_logs (via JPA).
+  3. MySQL ejecuta AUTOMÁTICAMENTE el trigger.
+  4. El trigger inserta un registro en access_audit_log con:
+     - Tipo de acción: "INSERT"
+     - El UID de la tarjeta
+     - Si el acceso fue concedido o denegado
+     - La estación donde ocurrió
+     - Timestamps original y de auditoría
+     - Una descripción legible del evento
+
+Verificación en MySQL Workbench:
+  SHOW TRIGGERS FROM smart_access_db;
+  SELECT * FROM access_audit_log;
+
+
+5.2 STORED PROCEDURE: sp_backup_access_logs
+---------------------------------------------
+
+Propósito: Copiar todos los registros de access_logs que no hayan sido
+respaldados previamente a la tabla access_logs_backup.
+
+Código SQL:
+
+  ┌────────────────────────────────────────────────────────────────────┐
+  │  CREATE PROCEDURE sp_backup_access_logs()                         │
+  │  BEGIN                                                             │
+  │      DECLARE v_count INT DEFAULT 0;                               │
+  │                                                                    │
+  │      INSERT INTO access_logs_backup                               │
+  │          (original_id, uid_detected, access_timestamp,            │
+  │           access_granted, station_id, backup_timestamp)           │
+  │      SELECT al.id, al.uid_detected, al.access_timestamp,         │
+  │             al.access_granted, al.station_id, NOW()               │
+  │      FROM access_logs al                                          │
+  │      LEFT JOIN access_logs_backup alb                             │
+  │          ON al.id = alb.original_id                               │
+  │      WHERE alb.original_id IS NULL;                               │
+  │                                                                    │
+  │      SET v_count = ROW_COUNT();                                   │
+  │                                                                    │
+  │      SELECT v_count AS registros_respaldados,                     │
+  │             NOW() AS fecha_backup,                                │
+  │             'Backup completado exitosamente' AS mensaje;          │
+  │  END                                                               │
+  └────────────────────────────────────────────────────────────────────┘
+
+Funcionamiento:
+  1. El stored procedure compara access_logs con access_logs_backup.
+  2. Identifica registros que NO tienen copia en la tabla de backup
+     (usando LEFT JOIN + WHERE IS NULL).
+  3. Copia esos registros a access_logs_backup con un timestamp de backup.
+  4. Retorna el número de registros respaldados.
+
+Cuándo se ejecuta:
+  - Automáticamente por el proceso batch (BatchProcessingJob.java) cada día.
+  - Manualmente desde MySQL: CALL sp_backup_access_logs();
+
+Integración con Java (BatchProcessingJob.java):
+
+  ┌────────────────────────────────────────────────────────────────────┐
+  │  // Dentro del método processDailyBatch():                        │
+  │                                                                    │
+  │  // Paso 4: Ejecutar backup en MySQL via stored procedure         │
+  │  try {                                                             │
+  │      int backupCount = databaseBackupService.executeBackup();     │
+  │      log.info("Backup MySQL completado: {} registros", count);    │
+  │  } catch (Exception e) {                                          │
+  │      log.error("Error en backup MySQL: {}", e.getMessage());     │
+  │  }                                                                 │
+  └────────────────────────────────────────────────────────────────────┘
+
+
+5.3 STORED PROCEDURE: sp_daily_stats
+--------------------------------------
+
+Propósito: Consultar las estadísticas de acceso del día actual.
+
+Código SQL:
+
+  ┌────────────────────────────────────────────────────────────────────┐
+  │  CREATE PROCEDURE sp_daily_stats()                                │
+  │  BEGIN                                                             │
+  │      SELECT                                                       │
+  │          COUNT(*) AS total_accesos,                               │
+  │          SUM(CASE WHEN access_granted = TRUE                      │
+  │              THEN 1 ELSE 0 END) AS accesos_concedidos,           │
+  │          SUM(CASE WHEN access_granted = FALSE                     │
+  │              THEN 1 ELSE 0 END) AS accesos_denegados,            │
+  │          COUNT(DISTINCT uid_detected) AS usuarios_unicos,         │
+  │          MIN(access_timestamp) AS primer_acceso,                  │
+  │          MAX(access_timestamp) AS ultimo_acceso,                  │
+  │          CURDATE() AS fecha_consulta                              │
+  │      FROM access_logs                                             │
+  │      WHERE DATE(access_timestamp) = CURDATE();                   │
+  │  END                                                               │
+  └────────────────────────────────────────────────────────────────────┘
+
+Verificación en MySQL Workbench:
+  CALL sp_daily_stats();
+
+
+5.4 TABLAS AUXILIARES CREADAS
+------------------------------
+
+Tabla: access_audit_log (llenada por el trigger)
+
+  Columna             │ Tipo          │ Descripción
+  ────────────────────┼───────────────┼──────────────────────────────
+  audit_id            │ INT (PK, AI)  │ ID único de auditoría
+  action_type         │ VARCHAR(20)   │ Tipo de acción ("INSERT")
+  uid_detected        │ VARCHAR(50)   │ UID de la tarjeta escaneada
+  access_granted      │ BOOLEAN       │ Si se concedió el acceso
+  station_id          │ INT           │ ID de la estación
+  original_timestamp  │ DATETIME      │ Hora original del acceso
+  audit_timestamp     │ DATETIME      │ Hora del registro de auditoría
+  audit_description   │ VARCHAR(255)  │ Descripción legible del evento
+
+Tabla: access_logs_backup (llenada por el stored procedure)
+
+  Columna             │ Tipo          │ Descripción
+  ────────────────────┼───────────────┼──────────────────────────────
+  backup_id           │ INT (PK, AI)  │ ID único del backup
+  original_id         │ INT           │ ID original del access_log
+  uid_detected        │ VARCHAR(50)   │ UID de la tarjeta
+  access_timestamp    │ DATETIME      │ Hora del acceso original
+  access_granted      │ BOOLEAN       │ Si se concedió el acceso
+  station_id          │ INT           │ ID de la estación
+  backup_timestamp    │ DATETIME      │ Hora del respaldo
+
+
+================================================================================
+  SECCIÓN 6: EVIDENCIA DEL FUNCIONAMIENTO
+================================================================================
+
+  [Insertar aquí las capturas de pantalla del equipo]
+
+  Evidencia sugerida:
+
+  6.1 - Dashboard principal con sesión activa y contadores de acceso.
+
+  6.2 - Archivo CSV principal (data_logs/) mostrando registros en
+        tiempo real durante la sesión.
+
+  6.3 - Archivo CSV de respaldo (data_logs_backup/) mostrando los
+        mismos registros que el CSV principal.
+
+  6.4 - Archivo .file_tracker.dat visible en el explorador de archivos
+        (con archivos ocultos activados).
+
+  6.5 - MySQL Workbench: resultado de SHOW TRIGGERS mostrando
+        trg_after_access_insert.
+
+  6.6 - MySQL Workbench: resultado de SHOW PROCEDURE STATUS mostrando
+        sp_backup_access_logs y sp_daily_stats.
+
+  6.7 - MySQL Workbench: resultado de SELECT * FROM access_audit_log
+        mostrando registros creados automáticamente por el trigger.
+
+  6.8 - MySQL Workbench: resultado de CALL sp_daily_stats() mostrando
+        estadísticas del día.
+
+  6.9 - Demostración de resiliencia:
+        a) CSV con datos visibles antes de borrar
+        b) CSV borrado del explorador de archivos
+        c) Escanear otra tarjeta
+        d) CSV restaurado automáticamente con todos los datos
+
+  6.10 - Registro de usuarios en user_registry.csv y su respaldo
+         en data_logs_backup/user_registry_backup.csv.
+
+
+================================================================================
+  RESUMEN DE ARCHIVOS NUEVOS Y MODIFICADOS
+================================================================================
+
+  ARCHIVOS NUEVOS:
+  ────────────────
+  • schema-entregable3.sql          → Trigger, stored procedures, tablas
+  • schema-entregable3-manual.sql   → Versión para MySQL Workbench
+  • BinaryFileTracker.java          → Archivo binario con nombre del CSV
+  • DatabaseBackupService.java      → Llamar stored procedures desde Java
+  • CsvResilienceService.java       → Verificación periódica de archivos CSV
+
+  ARCHIVOS MODIFICADOS:
+  ─────────────────────
+  • CsvAccessLogWriter.java         → Escritura dual + resiliencia
+  • CsvUserRegistryAdapter.java     → Escritura dual + carga desde backup
+  • CsvAccessLogReader.java         → Lectura con fallback al backup
+  • BatchProcessingJob.java         → Backup MySQL post-batch
+  • application.properties          → Configuración de rutas y SQL init
+
+================================================================================
+                    FIN DEL DOCUMENTO - ENTREGABLE 3
+================================================================================

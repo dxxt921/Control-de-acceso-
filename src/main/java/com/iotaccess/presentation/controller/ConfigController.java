@@ -121,6 +121,41 @@ public class ConfigController {
     }
 
     /**
+     * API: Reconecta el Arduino a la sesión CSV existente.
+     * Permite continuar trabajando después de desconectar y reconectar el Arduino.
+     */
+    @PostMapping("/api/session/reconnect")
+    @ResponseBody
+    public ResponseEntity<Map<String, Object>> reconnectSession(
+            @RequestParam String portName) {
+
+        Map<String, Object> response = new HashMap<>();
+
+        try {
+            log.info("Solicitud de reconexión: puerto={}", portName);
+
+            if (portName == null || portName.isBlank()) {
+                response.put("success", false);
+                response.put("message", "Debe seleccionar un puerto");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            accessService.reconnectSession(portName);
+
+            response.put("success", true);
+            response.put("message", "Arduino reconectado. Continuando en el mismo CSV.");
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error reconectando: {}", e.getMessage());
+            response.put("success", false);
+            response.put("message", "Error: " + e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    /**
      * API: Obtiene el estado de la sesión actual.
      */
     @GetMapping("/api/session/status")

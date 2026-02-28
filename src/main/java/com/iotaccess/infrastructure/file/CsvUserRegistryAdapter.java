@@ -21,6 +21,10 @@ import java.util.concurrent.CopyOnWriteArrayList;
 /**
  * Adaptador para gestionar el archivo user_registry.csv.
  * Implementa lectura/escritura thread-safe del registro de usuarios.
+ * 
+ * ENTREGABLE 3:
+ * - Escribe simultáneamente al CSV normal y al CSV de respaldo.
+ * - Si el archivo principal no existe al cargar, intenta recuperar del backup.
  */
 @Component
 @Slf4j
@@ -32,20 +36,60 @@ public class CsvUserRegistryAdapter implements UserRegistryPort {
     @Value("${csv.user-registry-path:./data_logs/user_registry.csv}")
     private String userRegistryPath;
 
+    @Value("${csv.backup-user-registry-path:./data_logs_backup/user_registry_backup.csv}")
+    private String backupUserRegistryPath;
+
     // Cache en memoria para acceso rápido (thread-safe)
     private final CopyOnWriteArrayList<RegisteredUser> usersCache = new CopyOnWriteArrayList<>();
 
     @PostConstruct
     public void init() {
-        ensureFileExists();
+        // Cargar datos existentes en memoria (del backup si existe)
         loadFromFile();
+
+        // Borrar archivos viejos para recrearlos dinámicamente
+        deleteFileIfExists(userRegistryPath);
+        deleteFileIfExists(backupUserRegistryPath);
+
+        // Crear archivos nuevos
+        ensureFileExists();
+
+        // Restaurar datos de usuarios al archivo nuevo
+        if (!usersCache.isEmpty()) {
+            saveToFile();
+        }
+
+        log.info("✓ user_registry.csv creado al iniciar programa con {} usuarios", usersCache.size());
+    }
+
+    /**
+     * Elimina un archivo si existe.
+     */
+    private void deleteFileIfExists(String filePath) {
+        try {
+            Path path = Paths.get(filePath);
+            if (Files.exists(path)) {
+                Files.delete(path);
+                log.debug("Archivo eliminado para recrear: {}", filePath);
+            }
+        } catch (IOException e) {
+            log.warn("No se pudo eliminar {}: {}", filePath, e.getMessage());
+        }
     }
 
     /**
      * Asegura que el archivo CSV existe con el header correcto.
      */
     private void ensureFileExists() {
-        Path path = Paths.get(userRegistryPath);
+        ensureSingleFileExists(userRegistryPath);
+        ensureSingleFileExists(backupUserRegistryPath);
+    }
+
+    /**
+     * Asegura que un archivo CSV individual existe con el header correcto.
+     */
+    private void ensureSingleFileExists(String filePath) {
+        Path path = Paths.get(filePath);
 
         try {
             // Crear directorios si no existen
@@ -59,23 +103,41 @@ public class CsvUserRegistryAdapter implements UserRegistryPort {
                 try (CSVWriter writer = new CSVWriter(new FileWriter(path.toFile()))) {
                     writer.writeNext(CSV_HEADER);
                 }
-                log.info("Archivo user_registry.csv creado: {}", path);
+                log.info("Archivo CSV creado: {}", path);
             }
         } catch (IOException e) {
-            log.error("Error creando archivo user_registry.csv: {}", e.getMessage());
+            log.error("Error creando archivo CSV {}: {}", filePath, e.getMessage());
         }
     }
 
     /**
      * Carga usuarios desde el archivo CSV a la cache en memoria.
+     * Si el archivo principal no existe, intenta cargar desde el backup.
      */
     private synchronized void loadFromFile() {
         usersCache.clear();
         Path path = Paths.get(userRegistryPath);
+        Path backupPath = Paths.get(backupUserRegistryPath);
 
+        // ENTREGABLE 3: Resiliencia - si el principal no existe, intentar backup
         if (!Files.exists(path)) {
-            log.warn("Archivo user_registry.csv no encontrado");
-            return;
+            log.warn("Archivo user_registry.csv no encontrado, intentando restaurar desde backup...");
+            if (Files.exists(backupPath)) {
+                try {
+                    // Asegurar directorio padre
+                    if (path.getParent() != null && !Files.exists(path.getParent())) {
+                        Files.createDirectories(path.getParent());
+                    }
+                    Files.copy(backupPath, path, StandardCopyOption.REPLACE_EXISTING);
+                    log.info("✓ user_registry.csv restaurado desde backup exitosamente");
+                } catch (IOException e) {
+                    log.error("Error restaurando user_registry desde backup: {}", e.getMessage());
+                    return;
+                }
+            } else {
+                log.warn("Ni el archivo principal ni el backup de user_registry existen");
+                return;
+            }
         }
 
         try (CSVReader reader = new CSVReader(new FileReader(path.toFile()))) {
@@ -101,32 +163,50 @@ public class CsvUserRegistryAdapter implements UserRegistryPort {
     }
 
     /**
-     * Guarda todos los usuarios de la cache al archivo CSV.
+     * Guarda todos los usuarios de la cache al archivo CSV principal y al de
+     * respaldo.
      */
     private synchronized void saveToFile() {
-        Path path = Paths.get(userRegistryPath);
+        // Guardar en archivo principal
+        saveToSingleFile(userRegistryPath);
 
-        try (CSVWriter writer = new CSVWriter(new FileWriter(path.toFile()))) {
-            // Escribir header
-            writer.writeNext(CSV_HEADER);
+        // ENTREGABLE 3: Guardar también en archivo de respaldo
+        saveToSingleFile(backupUserRegistryPath);
+    }
 
-            // Escribir cada usuario
-            for (RegisteredUser user : usersCache) {
-                String[] line = {
-                        user.getUid(),
-                        user.getName(),
-                        user.getRegisteredAt() != null
-                                ? user.getRegisteredAt().format(TIMESTAMP_FORMAT)
-                                : ""
-                };
-                writer.writeNext(line);
+    /**
+     * Guarda todos los usuarios de la cache a un archivo CSV específico.
+     */
+    private void saveToSingleFile(String filePath) {
+        Path path = Paths.get(filePath);
+
+        try {
+            // Asegurar directorio padre
+            if (path.getParent() != null && !Files.exists(path.getParent())) {
+                Files.createDirectories(path.getParent());
             }
 
-            log.info("Guardados {} usuarios en user_registry.csv", usersCache.size());
+            try (CSVWriter writer = new CSVWriter(new FileWriter(path.toFile()))) {
+                // Escribir header
+                writer.writeNext(CSV_HEADER);
+
+                // Escribir cada usuario
+                for (RegisteredUser user : usersCache) {
+                    String[] line = {
+                            user.getUid(),
+                            user.getName(),
+                            user.getRegisteredAt() != null
+                                    ? user.getRegisteredAt().format(TIMESTAMP_FORMAT)
+                                    : ""
+                    };
+                    writer.writeNext(line);
+                }
+
+                log.info("Guardados {} usuarios en {}", usersCache.size(), filePath);
+            }
 
         } catch (IOException e) {
-            log.error("Error escribiendo user_registry.csv: {}", e.getMessage());
-            throw new RuntimeException("Error guardando registro de usuarios", e);
+            log.error("Error escribiendo {}: {}", filePath, e.getMessage());
         }
     }
 
@@ -181,7 +261,7 @@ public class CsvUserRegistryAdapter implements UserRegistryPort {
         // Agregar nuevo/actualizado
         usersCache.add(user);
 
-        // Persistir a disco
+        // Persistir a disco (principal + respaldo)
         saveToFile();
 
         log.info("Usuario guardado: {} - {}", user.getUid(), user.getName());
