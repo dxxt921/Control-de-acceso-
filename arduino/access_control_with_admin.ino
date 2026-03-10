@@ -30,11 +30,15 @@ Servo torniquete;
 
 #define TAG_COOLDOWN_MS 7000
 
+// =============================================
+// Variables de estado
 bool modoRegistro = false;
 bool esperandoAdmin = false;
-bool sesionActiva = false;   // Solo leer tags cuando Java esta conectado
+bool sesionActiva = true;   // Siempre leyendo tags (mitigacion para brownout resets)
+bool enVerificacion = false; // Flag para saber si estamos esperando respuesta de Java
 String serialBuffer = "";
 unsigned long ultimaLectura = 0;
+unsigned long tiempoVerificacion = 0; // Para el timeout de la conexion a Java
 
 // =============================================
 // Funcion auxiliar: Siempre configurar timeout
@@ -92,11 +96,41 @@ void reiniciarI2C() {
 void setup() {
   Serial.begin(115200);
   
-  Wire.begin();
-  setI2CTimeout();
+  // CRITICO: Recuperar bus I2C ANTES de inicializar dispositivos.
+  // Si el bus quedo colgado de la sesion anterior (LCD muestra bloques),
+  // esto lo destraba enviando 9 pulsos SCL + condicion STOP.
+  recoverI2CBus();
   
-  lcd.init();
-  lcd.backlight();
+  // Inicializar LCD con reintentos
+  bool lcdOk = false;
+  for (int intento = 0; intento < 3; intento++) {
+    lcd.init();
+    lcd.backlight();
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("INIT...");
+    delay(200);
+    
+    // Verificar si la LCD respondio (si no hay timeout, funciono)
+    if (!Wire.getWireTimeoutFlag()) {
+      lcdOk = true;
+      break;
+    }
+    
+    // Si fallo, recuperar bus e intentar de nuevo
+    Wire.clearWireTimeoutFlag();
+    Serial.print("LCD init intento ");
+    Serial.print(intento + 1);
+    Serial.println(" fallo, reintentando...");
+    recoverI2CBus();
+    delay(300);
+  }
+  
+  if (!lcdOk) {
+    Serial.println("WARN: LCD init fallo despues de 3 intentos");
+  }
+  
+  lcd.clear();
   
   // Servo a posicion inicial
   torniquete.attach(SERVO_PIN);
@@ -113,7 +147,7 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("   SYSTEM v2");
   delay(1500);
-  mostrarEsperaConexion();
+  mostrarEspera();
 }
 
 void loop() {
@@ -159,17 +193,35 @@ void loop() {
       lcd.print("VERIFICANDO");
       lcd.setCursor(0, 1);
       lcd.print("ADMIN...");
+      enVerificacion = true;
+      tiempoVerificacion = millis();
     } else if (modoRegistro) {
       lcd.clear();
       lcd.print("TAG DETECTADO");
       lcd.setCursor(0, 1);
       lcd.print("PROCESANDO...");
+      enVerificacion = true;
+      tiempoVerificacion = millis();
     } else {
       lcd.clear();
       lcd.print("VERIFICANDO...");
+      enVerificacion = true;
+      tiempoVerificacion = millis();
     }
     
     delay(500);
+  }
+
+  // Verificar timeout de validacion por desconexion PC (4 segundos)
+  if (enVerificacion && (millis() - tiempoVerificacion > 4000)) {
+    lcd.clear();
+    lcd.print("NO HAY RESPUESTA");
+    lcd.setCursor(0, 1);
+    lcd.print("DE LA PC...");
+    delay(2000);
+    
+    enVerificacion = false;
+    mostrarEspera();
   }
 
   // Auto-recuperacion si I2C tuvo timeout
@@ -183,6 +235,9 @@ void loop() {
 void procesarMensaje(String msg) {
   char cmd = msg.charAt(0);
   
+  // Al recibir un comando, ya no estamos esperando verificacion
+  enVerificacion = false;
+
   // Cualquier comando de Java activa la sesion
   if (!sesionActiva) {
     sesionActiva = true;

@@ -1,6 +1,6 @@
 package com.iotaccess.infrastructure.persistence;
 
-import com.iotaccess.infrastructure.persistence.entity.UserEntity;
+import com.iotaccess.infrastructure.persistence.entities.UserEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 

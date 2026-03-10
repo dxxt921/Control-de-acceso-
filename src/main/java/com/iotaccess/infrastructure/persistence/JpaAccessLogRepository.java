@@ -1,6 +1,6 @@
 package com.iotaccess.infrastructure.persistence;
 
-import com.iotaccess.infrastructure.persistence.entity.AccessLogEntity;
+import com.iotaccess.infrastructure.persistence.entities.AccessLogEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;

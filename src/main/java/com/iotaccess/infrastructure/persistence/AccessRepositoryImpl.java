@@ -2,9 +2,9 @@ package com.iotaccess.infrastructure.persistence;
 
 import com.iotaccess.domain.model.AccessRecord;
 import com.iotaccess.domain.model.AccessStatus;
-import com.iotaccess.domain.port.AccessRepository;
-import com.iotaccess.infrastructure.persistence.entity.AccessLogEntity;
-import com.iotaccess.infrastructure.persistence.entity.UserEntity;
+import com.iotaccess.utility.ports.AccessRepository;
+import com.iotaccess.infrastructure.persistence.entities.AccessLogEntity;
+import com.iotaccess.infrastructure.persistence.entities.UserEntity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -30,6 +30,7 @@ public class AccessRepositoryImpl implements AccessRepository {
 
     @Override
     @Transactional
+    @SuppressWarnings("null")
     public int saveAll(List<AccessRecord> records) {
         log.info("Guardando {} registros en la base de datos", records.size());
 
